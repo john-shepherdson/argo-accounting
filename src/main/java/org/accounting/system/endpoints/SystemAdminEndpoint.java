@@ -6,7 +6,9 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.Consumes;
+import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.PATCH;
@@ -21,17 +23,22 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import org.accounting.system.beans.RequestUserContext;
 import org.accounting.system.constraints.NotFoundEntity;
+import org.accounting.system.dtos.CountDocumentResponse;
 import org.accounting.system.dtos.InformativeResponse;
+import org.accounting.system.dtos.VersionDto;
 import org.accounting.system.dtos.admin.ProjectRegistrationRequest;
 import org.accounting.system.dtos.authorization.request.AssignRoleRequestDto;
 import org.accounting.system.dtos.authorization.request.DetachRoleRequestDto;
 import org.accounting.system.dtos.client.ClientResponseDto;
+import org.accounting.system.dtos.client.ClientUpdateRequest;
 import org.accounting.system.dtos.project.ProjectRequest;
 import org.accounting.system.dtos.project.UpdateProjectRequest;
 import org.accounting.system.dtos.resource.ResourceRequest;
 import org.accounting.system.dtos.resource.ResourceResponse;
+import org.accounting.system.entities.HierarchicalRelation;
 import org.accounting.system.entities.projections.normal.ProjectProjection;
 import org.accounting.system.interceptors.annotations.SystemAdmin;
+import org.accounting.system.repositories.ResourceRepository;
 import org.accounting.system.repositories.client.ClientRepository;
 import org.accounting.system.repositories.project.ProjectRepository;
 import org.accounting.system.services.SystemAdminService;
@@ -50,6 +57,8 @@ import org.eclipse.microprofile.openapi.annotations.security.SecurityRequirement
 import org.eclipse.microprofile.openapi.annotations.security.SecurityScheme;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
+import java.text.SimpleDateFormat;
+
 import static org.eclipse.microprofile.openapi.annotations.enums.ParameterIn.QUERY;
 
 @Path("/admin")
@@ -62,6 +71,9 @@ import static org.eclipse.microprofile.openapi.annotations.enums.ParameterIn.QUE
         in = SecuritySchemeIn.HEADER)
 
 public class SystemAdminEndpoint {
+
+    @ConfigProperty(name = "quarkus.application.version")
+    String version;
 
     @Inject
     ClientService clientService;
@@ -77,7 +89,6 @@ public class SystemAdminEndpoint {
 
     @Inject
     RequestUserContext requestUserContext;
-
 
     @Tag(name = "System Administrator")
     @Operation(
@@ -176,11 +187,72 @@ public class SystemAdminEndpoint {
     @SystemAdmin
     public Response createProject(@Valid @NotNull(message = "The request body is empty." ) ProjectRequest request, @Context UriInfo uriInfo) {
 
+        if(request.id.contains(HierarchicalRelation.PATH_SEPARATOR)){
+
+            throw new BadRequestException("Project ID should not contain a dot character.");
+        }
+
         var serverInfo = new AccountingUriInfo(serverUrl.concat(basePath).concat(uriInfo.getPath()));
 
         var response = systemAdminService.createProject(request, requestUserContext.getId());
 
         return Response.created(serverInfo.getAbsolutePathBuilder().path(response.id).build()).entity(response).build();
+    }
+
+    @Tag(name = "System Administrator")
+    @Operation(
+            summary = "Delete an existing Project.",
+            description = "Deletes an existing Project in the Accounting Service. Accessible only by system administrators.")
+    @APIResponse(
+            responseCode = "200",
+            description = "Project deleted successfully.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "401",
+            description = "Client has not been authenticated.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "403",
+            description = "The authenticated client is not permitted to perform the requested operation.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "404",
+            description = "Not Found.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "500",
+            description = "Internal Server Errors.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @SecurityRequirement(name = "Authentication")
+    @DELETE
+    @Path("/projects/{id}")
+    @Produces(value = MediaType.APPLICATION_JSON)
+    @SystemAdmin
+    public Response deleteProject(@Parameter(
+            description = "The Project to be deleted.",
+            required = true,
+            example = "447535",
+            schema = @Schema(type = SchemaType.STRING))
+                                       @PathParam("id") @Valid
+                                      @NotFoundEntity(repository = ProjectRepository.class, id = String.class, message = "There is no Project with the following id:") String id) {
+
+        systemAdminService.deleteProject(id);
+
+        var response = new InformativeResponse();
+        response.code = 200;
+        response.message = "Project deleted successfully.";
+
+        return Response.ok().entity(response).build();
     }
 
     @Tag(name = "System Administrator")
@@ -237,6 +309,62 @@ public class SystemAdminEndpoint {
         var response = systemAdminService.createResource(request);
 
         return Response.created(serverInfo.getAbsolutePathBuilder().path(response.id).build()).entity(response).build();
+    }
+
+    @Tag(name = "System Administrator")
+    @Operation(
+            summary = "Delete an existing Resource.",
+            description = "Deletes an existing Resource in the Accounting Service. Accessible only by system administrators.")
+    @APIResponse(
+            responseCode = "200",
+            description = "Resource deleted successfully.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "401",
+            description = "Client has not been authenticated.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "403",
+            description = "The authenticated client is not permitted to perform the requested operation.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "404",
+            description = "Not Found.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "500",
+            description = "Internal Server Errors.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @SecurityRequirement(name = "Authentication")
+    @DELETE
+    @Path("/resources/{id}")
+    @Produces(value = MediaType.APPLICATION_JSON)
+    @SystemAdmin
+    public Response deleteResource(@Parameter(
+            description = "The Resource to be deleted.",
+            required = true,
+            example = "unitartu.ut.rocket",
+            schema = @Schema(type = SchemaType.STRING))
+                                  @PathParam("id") @Valid
+                                  @NotFoundEntity(repository = ResourceRepository.class, id = String.class, message = "There is no Resource with the following id:") String id) {
+
+        systemAdminService.deleteResource(id);
+
+        var response = new InformativeResponse();
+        response.code = 200;
+        response.message = "Resource deleted successfully.";
+
+        return Response.ok().entity(response).build();
     }
 
     @Tag(name = "System Administrator")
@@ -317,6 +445,18 @@ public class SystemAdminEndpoint {
             content = @Content(schema = @Schema(
                     type = SchemaType.OBJECT,
                     implementation = ClientEndpoint.PageableClientResponseDto.class)))
+    @APIResponse(
+            responseCode = "401",
+            description = "Client has not been authenticated.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "403",
+            description = "The authenticated client is not permitted to perform the requested operation.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
     @APIResponse(
             responseCode = "500",
             description = "Internal Server Errors.",
@@ -458,7 +598,6 @@ public class SystemAdminEndpoint {
                     type = SchemaType.OBJECT,
                     implementation = InformativeResponse.class)))
     @SecurityRequirement(name = "Authentication")
-
     @POST
     @Path("clients/{client_id}/detach-roles")
     @Produces(value = MediaType.APPLICATION_JSON)
@@ -477,5 +616,182 @@ public class SystemAdminEndpoint {
         var response = clientService.detachRolesFromRegisteredClient(clientId, detachRoleRequestDto.roles);
 
         return Response.ok().entity(response).build();
+    }
+
+    @Tag(name = "System Administrator")
+    @Operation(
+            summary = "Returns the version of the Accounting Service API.",
+            description = "Returns the version of the Accounting Service API.")
+    @APIResponse(
+            responseCode = "200",
+            description = "The Accounting Service API version.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = VersionDto.class)))
+    @APIResponse(
+            responseCode = "401",
+            description = "Client has not been authenticated.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "403",
+            description = "The authenticated client is not permitted to perform the requested operation.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "500",
+            description = "Internal Server Error.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @SecurityRequirement(name = "Authentication")
+    @GET
+    @Path("/version")
+    @Produces(value = MediaType.APPLICATION_JSON)
+    @SystemAdmin
+    public Response version() {
+
+        var versionDto = new VersionDto();
+        versionDto.version = version;
+
+        return Response.status(Response.Status.OK).entity(versionDto).build();
+    }
+
+    @Tag(name = "System Administrator")
+    @Operation(
+            summary = "Get document count for a specific time period.",
+            description = "Returns the number of documents inserted in Metric Definition, Metric, and User collections within the given start and end dates.")
+    @APIResponse(
+            responseCode = "200",
+            description = "Document count retrieved successfully.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = CountDocumentResponse.class)))
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid date format.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "401",
+            description = "Client has not been authenticated.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "403",
+            description = "The authenticated client is not permitted to perform the requested operation.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "500",
+            description = "Internal Server Errors.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @SecurityRequirement(name = "Authentication")
+    @GET
+    @Path("/metrics")
+    @Produces(value = MediaType.APPLICATION_JSON)
+    @SystemAdmin
+    public Response getDocuments(@Parameter(description = "Start date in YYYY-MM-DD format.", required = true, example = "2024-03-01") @QueryParam("startDate") String start,
+                                 @Parameter(description = "End date in YYYY-MM-DD format.", required = true, example = "2024-03-10") @QueryParam("endDate") String end){
+
+        try {
+
+            var sdf = new SimpleDateFormat("yyyy-MM-dd");
+            var startDate = sdf.parse(start);
+            var endDate = sdf.parse(end);
+
+            // Validation: Start date should not be after the end date
+            if (startDate.after(endDate)) {
+
+                var error = new InformativeResponse();
+                error.message = "Invalid date range. Start date must be before end date.";
+                error.code = 400;
+
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(error)
+                        .build();
+            }
+
+            var response = new CountDocumentResponse();
+
+            response.metricDefinitionCount = systemAdminService.countDocuments("MetricDefinition", startDate, endDate);
+            response.metricCount = systemAdminService.countDocuments("Metric", startDate, endDate);
+            response.userCount = clientService.countDocuments(startDate, endDate);
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+
+            var error = new InformativeResponse();
+            error.message = "Invalid date format. Use yyyy-MM-dd";
+            error.code = 400;
+
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(error)
+                    .build();
+        }
+    }
+
+    @Tag(name = "System Administrator")
+    @Operation(
+            summary = "Update user information.",
+            description = "Allows administrators to update user details.")
+    @APIResponse(
+            responseCode = "200",
+            description = "User updated successfully.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "400",
+            description = "Invalid input data.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "401",
+            description = "Client has not been authenticated.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "403",
+            description = "The authenticated client is not permitted to perform the requested operation.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "404",
+            description = "User not found.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @APIResponse(
+            responseCode = "500",
+            description = "Internal Server Errors.",
+            content = @Content(schema = @Schema(
+                    type = SchemaType.OBJECT,
+                    implementation = InformativeResponse.class)))
+    @SecurityRequirement(name = "Authentication")
+    @PATCH
+    @Path("/clients/{client_id}")
+    @Produces(value = MediaType.APPLICATION_JSON)
+    @SystemAdmin
+    public Response updateClient( @Parameter(
+            description = "Unique identifier of the user to be updated.",
+            required = true,
+            example = "xyz@example.org",
+            schema = @Schema(type = SchemaType.STRING))
+                                    @PathParam("client_id") @Valid @NotFoundEntity(repository = ClientRepository.class, id = String.class, message = "There is no User with the following id:") String id,
+                                  @Valid @NotNull(message = "The request body is empty.") ClientUpdateRequest request){
+
+        return Response.ok().entity(clientService.updateClient(id, request)).build();
     }
 }
